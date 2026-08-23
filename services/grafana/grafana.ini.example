@@ -1,0 +1,25 @@
+# Grafana configuration. Most settings are passed via environment variables
+# from docker-compose.yml; this file holds minimal defaults.
+
+[paths]
+data = /var/lib/grafana
+logs = /var/log/grafana
+plugins = /var/lib/grafana/plugins
+provisioning = /etc/grafana/provisioning
+
+[server]
+protocol = http
+# GF_SERVER_HTTP_ADDR is set from .env (default: 127.0.0.1)
+http_port = 3000
+#root_url = YOURDOMAIN
+
+[security]
+admin_user = admin
+# GF_SECURITY_ADMIN_PASSWORD is set from .env
+
+[users]
+allow_sign_up = false
+
+[analytics]
+reporting_enabled = false
+check_for_updates = false
