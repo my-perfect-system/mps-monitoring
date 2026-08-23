@@ -1,24 +1,4 @@
 services:
-  setup-perms:
-    image: alpine:3.23
-    container_name: mps-setup-perms
-    profiles: ["setup"]
-    user: "0:0"
-    volumes:
-      - ./services/prometheus/data:/target/prometheus
-      - ./services/loki/data:/target/loki
-      - ./services/grafana/data:/target/grafana
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -e
-        echo "Fixing ownership of bind-mounted data directories..."
-        chown -R 65534:65534 /target/prometheus
-        chown -R 10001:10001 /target/loki
-        # Grafana runs as root (user: 0:0) so it can update its bundled
-        # plugins dir; no chown needed for grafana data.
-        echo "Done. You can now run: docker compose up -d"
-
   prometheus:
     image: prom/prometheus:${PROMETHEUS_VERSION}
     container_name: prometheus
@@ -53,23 +33,6 @@ services:
       - "${BIND_IP}:${LOKI_PORT}:3100"
     networks:
       - monitoring
-
-  alloy:
-    image: grafana/alloy:${ALLOY_VERSION}
-    container_name: alloy
-    restart: unless-stopped
-    privileged: true
-    volumes:
-      - ./services/alloy/alloy.alloy:/etc/alloy/config.alloy:ro
-      - ${DOCKER_CONTAINERS_DIR}:/var/lib/docker/containers:ro
-      - ${DOCKER_SOCK}:/var/run/docker.sock:ro
-    command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
-    ports:
-      - "${BIND_IP}:${ALLOY_PORT}:12345"
-    networks:
-      - monitoring
-    depends_on:
-      - loki
 
   grafana:
     image: grafana/grafana:${GRAFANA_VERSION}
