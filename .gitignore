@@ -6,4 +6,10 @@
 /services/loki/loki-config.yml
 /services/prometheus/data/
 /services/prometheus/prometheus.yml
+/services/wazuh/config/
+# legacy bind-mount state (Wazuh now uses named volumes); safe to delete
+/services/wazuh/data/
+/services/wazuh/wazuh-certs-tool.sh
+/services/wazuh/wazuh-certificates/
+/services/wazuh/wazuh-certificates-tool.log
 

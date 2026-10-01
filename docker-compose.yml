@@ -56,6 +56,148 @@ services:
       - prometheus
       - loki
 
+  # ---------------------------------------------------------------------------
+  # Wazuh SIEM (5.0 beta) — opt-in via the "wazuh" compose profile (set
+  # COMPOSE_PROFILES in .env). Requires a one-time `scripts/wazuh-setup.sh` run
+  # to generate the TLS certificates the containers mount. The hostnames
+  # (wazuh.manager/indexer/dashboard) are the certificate DNS names and must
+  # match services/wazuh/config.yml. Credentials come from the environment;
+  # the manager generates its own agent-listener (remoted) certificate.
+  # ---------------------------------------------------------------------------
+  wazuh.manager:
+    profiles: ["wazuh"]
+    image: wazuh/wazuh-manager:${WAZUH_VERSION:-5.0.0-beta5}
+    hostname: wazuh.manager
+    container_name: wazuh.manager
+    restart: unless-stopped
+    depends_on:
+      wazuh.indexer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "/var/wazuh-manager/bin/wazuh-manager-control status 2>/dev/null | grep -q 'not running' && exit 1 || exit 0"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 655360
+        hard: 655360
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${WAZUH_AGENT_PORT:-1514}:1514"
+      - "${BIND_IP:-127.0.0.1}:${WAZUH_ENROLLMENT_PORT:-1515}:1515"
+      - "${BIND_IP:-127.0.0.1}:${WAZUH_TLS_PORT:-1517}:1517"
+      - "${BIND_IP:-127.0.0.1}:${WAZUH_SYSLOG_PORT:-514}:514/udp"
+      - "${BIND_IP:-127.0.0.1}:${WAZUH_API_PORT:-55000}:55000"
+    environment:
+      - WAZUH_INDEXER_HOSTS=wazuh.indexer:9200
+      - WAZUH_NODE_NAME=manager
+      - WAZUH_CLUSTER_NODES=wazuh.manager
+      - WAZUH_CLUSTER_BIND_ADDR=wazuh.manager
+      - INDEXER_USERNAME=${WAZUH_MANAGER_INDEXER_USER:-wazuh-manager}
+      - INDEXER_PASSWORD=${WAZUH_MANAGER_INDEXER_PASSWORD:-wazuh-manager}
+    volumes:
+      - wazuh_manager_api_configuration:/var/wazuh-manager/api/configuration
+      - wazuh_manager_etc:/var/wazuh-manager/etc
+      - wazuh_manager_logs:/var/wazuh-manager/logs
+      - wazuh_manager_queue:/var/wazuh-manager/queue
+      - wazuh_manager_var_multigroups:/var/wazuh-manager/var/multigroups
+      - ./services/wazuh/config/root-ca/certs/root-ca.pem:/var/wazuh-manager/etc/certs/root-ca.pem
+      - ./services/wazuh/config/wazuh_manager/certs/wazuh.manager.pem:/var/wazuh-manager/etc/certs/indexer-connector.pem
+      - ./services/wazuh/config/wazuh_manager/certs/wazuh.manager-key.pem:/var/wazuh-manager/etc/certs/indexer-connector-key.pem
+    networks:
+      - monitoring
+
+  wazuh.indexer:
+    profiles: ["wazuh"]
+    image: wazuh/wazuh-indexer:${WAZUH_VERSION:-5.0.0-beta5}
+    hostname: wazuh.indexer
+    container_name: wazuh.indexer
+    restart: unless-stopped
+    environment:
+      - OPENSEARCH_JAVA_OPTS=-Xms${WAZUH_INDEXER_HEAP:-1}g -Xmx${WAZUH_INDEXER_HEAP:-1}g
+      - bootstrap.memory_lock=true
+      - network.host=0.0.0.0
+      - node.name=wazuh.indexer
+      - cluster.initial_cluster_manager_nodes=wazuh.indexer
+      - discovery.seed_hosts=wazuh.indexer
+      - node.max_local_storage_nodes=1
+      - plugins.security.allow_default_init_securityindex=true
+      - NODES_DN=CN=wazuh.indexer,OU=Wazuh,O=Wazuh,L=California,C=US
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fks https://localhost:9200/_plugins/_security/health | grep -q '\"status\":\"UP\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    volumes:
+      - wazuh_indexer_data:/var/lib/wazuh-indexer
+      - ./services/wazuh/config/root-ca/certs/root-ca.pem:/usr/share/wazuh-indexer/config/certs/root-ca.pem
+      - ./services/wazuh/config/wazuh_indexer/certs/wazuh.indexer-key.pem:/usr/share/wazuh-indexer/config/certs/indexer-key.pem
+      - ./services/wazuh/config/wazuh_indexer/certs/wazuh.indexer.pem:/usr/share/wazuh-indexer/config/certs/indexer.pem
+      - ./services/wazuh/config/wazuh_indexer/certs/admin.pem:/usr/share/wazuh-indexer/config/certs/admin.pem
+      - ./services/wazuh/config/wazuh_indexer/certs/admin-key.pem:/usr/share/wazuh-indexer/config/certs/admin-key.pem
+    networks:
+      - monitoring
+
+  wazuh.dashboard:
+    profiles: ["wazuh"]
+    image: wazuh/wazuh-dashboard:${WAZUH_VERSION:-5.0.0-beta5}
+    hostname: wazuh.dashboard
+    container_name: wazuh.dashboard
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-s", "-o", "/dev/null", "https://localhost:5601/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    ports:
+      - "${BIND_IP:-127.0.0.1}:${WAZUH_DASHBOARD_PORT:-443}:5601"
+    environment:
+      - SERVER_PORT=5601
+      - SERVER_HOST=0.0.0.0
+      - OPENSEARCH_HOSTS=https://wazuh.indexer:9200
+      - WAZUH_API_URL=https://wazuh.manager
+      - DASHBOARD_USERNAME=${WAZUH_DASHBOARD_USER:-kibanaserver}
+      - DASHBOARD_PASSWORD=${WAZUH_DASHBOARD_PASSWORD:-kibanaserver}
+      - SERVER_SSL_CERTIFICATE=/usr/share/wazuh-dashboard/config/certs/dashboard.pem
+      - SERVER_SSL_KEY=/usr/share/wazuh-dashboard/config/certs/dashboard-key.pem
+      - OPENSEARCH_SSL_CERTIFICATE_AUTHORITIES=/usr/share/wazuh-dashboard/config/certs/root-ca.pem
+    volumes:
+      - ./services/wazuh/config/wazuh_dashboard/certs/wazuh.dashboard.pem:/usr/share/wazuh-dashboard/config/certs/dashboard.pem
+      - ./services/wazuh/config/wazuh_dashboard/certs/wazuh.dashboard-key.pem:/usr/share/wazuh-dashboard/config/certs/dashboard-key.pem
+      - ./services/wazuh/config/root-ca/certs/root-ca.pem:/usr/share/wazuh-dashboard/config/certs/root-ca.pem
+      - wazuh_dashboard_config:/usr/share/wazuh-dashboard/config
+      - wazuh_dashboard_custom:/usr/share/wazuh-dashboard/plugins/wazuh/public/assets/custom
+    depends_on:
+      wazuh.indexer:
+        condition: service_healthy
+      wazuh.manager:
+        condition: service_healthy
+    networks:
+      - monitoring
+
+volumes:
+  wazuh_manager_api_configuration:
+  wazuh_manager_etc:
+  wazuh_manager_logs:
+  wazuh_manager_queue:
+  wazuh_manager_var_multigroups:
+  wazuh_indexer_data:
+  wazuh_dashboard_config:
+  wazuh_dashboard_custom:
+
 networks:
   monitoring:
     driver: bridge

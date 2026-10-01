@@ -1,0 +1,21 @@
+# Node configuration consumed by the Wazuh certificate tool
+# (scripts/wazuh-certificates-conf.sh -> wazuh-certs-tool.sh).
+#
+# The names here must match the compose service hostnames on the shared
+# `monitoring` network: they become the certificate DNS names.
+nodes:
+  # Wazuh indexer server nodes
+  indexer:
+    - name: wazuh.indexer
+      dns: "wazuh.indexer"
+
+  # Wazuh manager nodes
+  # Use node_type only with more than one Wazuh manager
+  manager:
+    - name: wazuh.manager
+      dns: "wazuh.manager"
+
+  # Wazuh dashboard node
+  dashboard:
+    - name: wazuh.dashboard
+      dns: "wazuh.dashboard"
